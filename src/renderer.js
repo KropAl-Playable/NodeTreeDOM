@@ -1,5 +1,6 @@
 import { TreeNode } from "./TreeNode.js";
 
+// Simple static renderer (без UI)
 export function renderTree(root, container) {
   if (!root || !container) {
     return;
@@ -27,14 +28,21 @@ export function renderTree(root, container) {
   container.appendChild(fragment);
 }
 
+// Интерактивный UI с выделением, коллапсом и drag'n'drop
 export function createCollapsibleTreeUI(root, container) {
   if (!root || !container) {
     return;
   }
 
   const collapsed = new WeakMap();
+  const nodeIds = new WeakMap();
+  let idSequence = 1;
+
   let selected = root;
   let autoId = countNodes(root) + 1;
+  let draggingNode = null;
+  let statusMessage = "";
+  let statusTimeout = null;
 
   container.innerHTML = "";
   const controls = buildControls();
@@ -74,25 +82,28 @@ export function createCollapsibleTreeUI(root, container) {
       selected.add(newNode);
       collapsed.set(selected, false);
       selected = newNode;
+      setStatus(`Добавлен узел "${newLabel}" в "${selected.parent?.label ?? "Root"}".`);
       render();
     });
 
     removeBtn.addEventListener("click", () => {
       if (selected === root) {
-        status.textContent = "Корень удалить нельзя.";
+        setStatus("Корень удалить нельзя.");
         return;
       }
       const parent = selected.parent;
       if (parent) {
+        const name = selected.label;
         parent.remove(selected);
         selected = parent;
+        setStatus(`Удалён узел "${name}".`);
         render();
       }
     });
 
     rebuildBtn.addEventListener("click", () => {
-      render();
-      status.textContent = "Дерево перестроено.";
+      render({ pulse: true });
+      setStatus("Дерево перестроено.");
     });
 
     wrapper.append(addBtn, removeBtn, rebuildBtn, status);
@@ -100,10 +111,17 @@ export function createCollapsibleTreeUI(root, container) {
     return { wrapper, addBtn, removeBtn, rebuildBtn, status };
   }
 
-  function render() {
+  function render(options = {}) {
     treeHost.innerHTML = "";
     treeHost.appendChild(buildNode(root, 0));
     updateControls();
+
+    if (options.pulse) {
+      treeHost.classList.remove("rebuilt");
+      // restart animation
+      void treeHost.offsetWidth;
+      treeHost.classList.add("rebuilt");
+    }
   }
 
   function buildNode(node, depth) {
@@ -121,10 +139,16 @@ export function createCollapsibleTreeUI(root, container) {
       row.classList.add("active");
     }
 
+    if (node !== root) {
+      row.draggable = true;
+    }
+
     row.addEventListener("click", () => {
       selected = node;
       render();
     });
+
+    attachDragEvents(row, node);
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -171,9 +195,107 @@ export function createCollapsibleTreeUI(root, container) {
     return holder;
   }
 
+  function attachDragEvents(row, node) {
+    const id = ensureNodeId(node);
+    row.dataset.nodeId = id;
+
+    row.addEventListener("dragstart", (event) => {
+      if (node === root) {
+        event.preventDefault();
+        return;
+      }
+      draggingNode = node;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", id);
+    });
+
+    row.addEventListener("dragenter", (event) => {
+      if (!draggingNode || draggingNode === node) {
+        return;
+      }
+      if (node.isDescendantOf(draggingNode)) {
+        row.classList.add("drop-blocked");
+        return;
+      }
+      event.preventDefault();
+      row.classList.add("drop-target");
+    });
+
+    row.addEventListener("dragover", (event) => {
+      if (!draggingNode || draggingNode === node || node.isDescendantOf(draggingNode)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    });
+
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("drop-target", "drop-blocked");
+    });
+
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      if (!draggingNode) {
+        return;
+      }
+      if (node === draggingNode || node.isDescendantOf(draggingNode)) {
+        setStatus("Нельзя переместить узел внутрь самого себя.");
+        clearDragState();
+        return;
+      }
+
+      const from = draggingNode.parent;
+      if (from) {
+        from.remove(draggingNode);
+      }
+      node.add(draggingNode);
+      collapsed.set(node, false);
+      selected = draggingNode;
+      setStatus(`Переместили "${draggingNode.label}" → "${node.label}".`);
+
+      clearDragState();
+      render();
+    });
+
+    row.addEventListener("dragend", () => {
+      clearDragState();
+    });
+  }
+
+  function ensureNodeId(node) {
+    if (!nodeIds.has(node)) {
+      nodeIds.set(node, `n-${idSequence++}`);
+    }
+    return nodeIds.get(node);
+  }
+
+  function clearDragState() {
+    draggingNode = null;
+    treeHost
+      .querySelectorAll(".dragging, .drop-target, .drop-blocked")
+      .forEach((el) => el.classList.remove("dragging", "drop-target", "drop-blocked"));
+  }
+
   function updateControls() {
     controls.removeBtn.disabled = selected === root;
-    controls.status.textContent = `Активный узел: ${selected.label || "Без имени"}`;
+    if (!statusMessage) {
+      controls.status.textContent = `Активный узел: ${selected.label || "Без имени"}`;
+    }
+  }
+
+  function setStatus(text, temporary = true) {
+    statusMessage = text;
+    controls.status.textContent = text;
+    if (temporary) {
+      if (statusTimeout) {
+        clearTimeout(statusTimeout);
+      }
+      statusTimeout = setTimeout(() => {
+        statusMessage = "";
+        updateControls();
+      }, 1600);
+    }
   }
 }
 
