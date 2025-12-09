@@ -1,10 +1,8 @@
 import { TreeNode } from "./TreeNode.js";
 
-// Simple static renderer (без UI)
+// Simple static renderer (no UI controls)
 export function renderTree(root, container) {
-  if (!root || !container) {
-    return;
-  }
+  if (!root || !container) return;
 
   container.innerHTML = "";
   const fragment = document.createDocumentFragment();
@@ -13,9 +11,7 @@ export function renderTree(root, container) {
     const el = document.createElement("div");
     el.className = "tree-node static";
     el.style.setProperty("--depth", depth);
-    if (depth === 0) {
-      el.classList.add("is-root");
-    }
+    if (depth === 0) el.classList.add("is-root");
     el.textContent = node.label || "Node";
     fragment.appendChild(el);
 
@@ -28,18 +24,15 @@ export function renderTree(root, container) {
   container.appendChild(fragment);
 }
 
-// Интерактивный UI с выделением, коллапсом и drag'n'drop
+// Interactive UI: selection, collapse, drag'n'drop, auto-naming, and pre-order display
 export function createCollapsibleTreeUI(root, container) {
-  if (!root || !container) {
-    return;
-  }
+  if (!root || !container) return;
 
   const collapsed = new WeakMap();
   const nodeIds = new WeakMap();
   let idSequence = 1;
 
   let selected = root;
-  let autoId = countNodes(root) + 1;
   let draggingNode = null;
   let statusMessage = "";
   let statusTimeout = null;
@@ -48,10 +41,9 @@ export function createCollapsibleTreeUI(root, container) {
   const controls = buildControls();
   const treeHost = document.createElement("div");
   treeHost.className = "tree-view";
+  const orderPanel = buildOrderPanel();
 
-  container.appendChild(controls.wrapper);
-  container.appendChild(treeHost);
-
+  container.append(controls.wrapper, treeHost, orderPanel.wrapper);
   render();
 
   function buildControls() {
@@ -68,16 +60,11 @@ export function createCollapsibleTreeUI(root, container) {
     removeBtn.className = "action danger";
     removeBtn.textContent = "× Удалить выбранный";
 
-    const rebuildBtn = document.createElement("button");
-    rebuildBtn.type = "button";
-    rebuildBtn.className = "action ghost";
-    rebuildBtn.textContent = "↻ Перестроить дерево";
-
     const status = document.createElement("div");
     status.className = "tree-status";
 
     addBtn.addEventListener("click", () => {
-      const newLabel = `Node ${autoId++}`;
+      const newLabel = nextAutoName(selected);
       const newNode = new TreeNode(newLabel);
       selected.add(newNode);
       collapsed.set(selected, false);
@@ -101,27 +88,27 @@ export function createCollapsibleTreeUI(root, container) {
       }
     });
 
-    rebuildBtn.addEventListener("click", () => {
-      render({ pulse: true });
-      setStatus("Дерево перестроено.");
-    });
-
-    wrapper.append(addBtn, removeBtn, rebuildBtn, status);
-
-    return { wrapper, addBtn, removeBtn, rebuildBtn, status };
+    wrapper.append(addBtn, removeBtn, status);
+    return { wrapper, addBtn, removeBtn, status };
   }
 
-  function render(options = {}) {
+  function buildOrderPanel() {
+    const wrapper = document.createElement("section");
+    wrapper.className = "order-panel";
+    const title = document.createElement("div");
+    title.className = "order-title";
+    title.textContent = "Обход дерева (pre-order, via each)";
+    const list = document.createElement("div");
+    list.className = "order-list";
+    wrapper.append(title, list);
+    return { wrapper, list };
+  }
+
+  function render() {
     treeHost.innerHTML = "";
     treeHost.appendChild(buildNode(root, 0));
     updateControls();
-
-    if (options.pulse) {
-      treeHost.classList.remove("rebuilt");
-      // restart animation
-      void treeHost.offsetWidth;
-      treeHost.classList.add("rebuilt");
-    }
+    updateOrderPanel();
   }
 
   function buildNode(node, depth) {
@@ -131,17 +118,10 @@ export function createCollapsibleTreeUI(root, container) {
     const row = document.createElement("div");
     row.className = "tree-node";
     row.style.setProperty("--depth", depth);
-    if (depth === 0) {
-      row.classList.add("is-root");
-    }
+    if (depth === 0) row.classList.add("is-root");
 
-    if (selected === node) {
-      row.classList.add("active");
-    }
-
-    if (node !== root) {
-      row.draggable = true;
-    }
+    if (selected === node) row.classList.add("active");
+    if (node !== root) row.draggable = true;
 
     row.addEventListener("click", () => {
       selected = node;
@@ -155,18 +135,12 @@ export function createCollapsibleTreeUI(root, container) {
     toggle.className = "node-toggle";
 
     const hasChildren = node.count > 0;
-    toggle.textContent = hasChildren
-      ? collapsed.get(node)
-        ? "▸"
-        : "▾"
-      : "•";
+    toggle.textContent = hasChildren ? (collapsed.get(node) ? "▸" : "▾") : "•";
     toggle.disabled = !hasChildren;
 
     toggle.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (!hasChildren) {
-        return;
-      }
+      if (!hasChildren) return;
       collapsed.set(node, !collapsed.get(node));
       render();
     });
@@ -181,11 +155,7 @@ export function createCollapsibleTreeUI(root, container) {
     if (hasChildren) {
       const children = document.createElement("div");
       children.className = "tree-children";
-
-      if (collapsed.get(node)) {
-        children.classList.add("collapsed");
-      }
-
+      if (collapsed.get(node)) children.classList.add("collapsed");
       for (const child of node.children()) {
         children.appendChild(buildNode(child, depth + 1));
       }
@@ -211,9 +181,7 @@ export function createCollapsibleTreeUI(root, container) {
     });
 
     row.addEventListener("dragenter", (event) => {
-      if (!draggingNode || draggingNode === node) {
-        return;
-      }
+      if (!draggingNode || draggingNode === node) return;
       if (node.isDescendantOf(draggingNode)) {
         row.classList.add("drop-blocked");
         return;
@@ -223,9 +191,7 @@ export function createCollapsibleTreeUI(root, container) {
     });
 
     row.addEventListener("dragover", (event) => {
-      if (!draggingNode || draggingNode === node || node.isDescendantOf(draggingNode)) {
-        return;
-      }
+      if (!draggingNode || draggingNode === node || node.isDescendantOf(draggingNode)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
     });
@@ -236,9 +202,7 @@ export function createCollapsibleTreeUI(root, container) {
 
     row.addEventListener("drop", (event) => {
       event.preventDefault();
-      if (!draggingNode) {
-        return;
-      }
+      if (!draggingNode) return;
       if (node === draggingNode || node.isDescendantOf(draggingNode)) {
         setStatus("Нельзя переместить узел внутрь самого себя.");
         clearDragState();
@@ -246,9 +210,7 @@ export function createCollapsibleTreeUI(root, container) {
       }
 
       const from = draggingNode.parent;
-      if (from) {
-        from.remove(draggingNode);
-      }
+      if (from) from.remove(draggingNode);
       node.add(draggingNode);
       collapsed.set(node, false);
       selected = draggingNode;
@@ -284,23 +246,72 @@ export function createCollapsibleTreeUI(root, container) {
     }
   }
 
+  function updateOrderPanel() {
+    const list = orderPanel.list;
+    list.innerHTML = "";
+    let first = true;
+    root.each((node, depth) => {
+      const id = ensureNodeId(node);
+      if (!first) {
+        const sep = document.createElement("span");
+        sep.className = "order-sep";
+        sep.textContent = "→";
+        list.appendChild(sep);
+      }
+      first = false;
+
+      const pill = document.createElement("span");
+      pill.className = "order-item";
+      if (node === selected) pill.classList.add("selected");
+      pill.dataset.nodeId = id;
+      pill.textContent = node.label || "Node";
+      pill.title = `depth: ${depth}`;
+
+      pill.addEventListener("mouseenter", () => highlightNodeById(id, true));
+      pill.addEventListener("mouseleave", () => highlightNodeById(id, false));
+      pill.addEventListener("click", () => {
+        selected = node;
+        collapsed.set(node, collapsed.get(node) || false);
+        render();
+      });
+
+      list.appendChild(pill);
+    });
+  }
+
+  function highlightNodeById(id, on) {
+    const target = treeHost.querySelector(`[data-node-id="${id}"]`);
+    if (target) {
+      target.classList.toggle("order-highlight", on);
+    }
+  }
+
   function setStatus(text, temporary = true) {
     statusMessage = text;
     controls.status.textContent = text;
     if (temporary) {
-      if (statusTimeout) {
-        clearTimeout(statusTimeout);
-      }
+      if (statusTimeout) clearTimeout(statusTimeout);
       statusTimeout = setTimeout(() => {
         statusMessage = "";
         updateControls();
       }, 1600);
     }
   }
-}
 
-function countNodes(root) {
-  let total = 0;
-  root.each(() => total++);
-  return total;
+  function nextAutoName(parent) {
+    const index = (parent.count || 0) + 1;
+    if (!parent.parent) return toLetters(index);
+    return `${parent.label}.${index}`;
+  }
+
+  function toLetters(num) {
+    let n = num;
+    let result = "";
+    while (n > 0) {
+      n -= 1;
+      result = String.fromCharCode(65 + (n % 26)) + result;
+      n = Math.floor(n / 26);
+    }
+    return result;
+  }
 }
